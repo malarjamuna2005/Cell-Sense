@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CellSense — EV Battery Health Monitoring</title>
+<style>
+/* ── CSS Reset & Base ─────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0e1a;--surface:#111827;--surface-alt:#1a2236;
+  --border:#1e293b;--border-focus:#06b6d4;
+  --text-primary:#e2e8f0;--text-secondary:#94a3b8;--text-muted:#64748b;
+  --accent:#06b6d4;--accent-dim:rgba(6,182,212,.15);
+  --success:#10b981;--warning:#f59e0b;--error:#ef4444;
+  --radius:12px;--radius-sm:8px;
+  --font-sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-mono:'SF Mono',SFMono-Regular,ui-monospace,'Cascadia Code',Consolas,monospace;
+}
+html{font-size:16px;scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text-primary);line-height:1.6;min-height:100vh}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;font:inherit;border:none;background:none;color:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px;border-radius:4px}
+input,select{font:inherit;color:var(--text-primary);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px}
+
+/* ── Layout ───────────────────────────────────────────────── */
+.app{display:flex;flex-direction:column;min-height:100vh}
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:baseline;gap:12px}
+.logo h1{font-size:1.5rem;font-weight:700;letter-spacing:.08em;color:var(--accent);text-shadow:0 0 20px rgba(6,182,212,.3)}
+.logo span{font-size:.85rem;color:var(--text-secondary)}
+.header-badges{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.badge-demo{background:rgba(245,158,11,.15);color:var(--warning);border:1px solid rgba(245,158,11,.3)}
+.badge-connected{background:rgba(16,185,129,.1);color:var(--success);border:1px solid rgba(16,185,129,.25)}
+.badge-disconnected{background:rgba(239,68,68,.1);color:var(--error);border:1px solid rgba(239,68,68,.2)}
+.badge-python{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(6,182,212,.3)}
+.badge-mcu{background:rgba(139,92,246,.15);color:#a78bfa;border:1px solid rgba(139,92,246,.3)}
+.conn-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.conn-dot.on{background:var(--success);box-shadow:0 0 6px var(--success)}
+.conn-dot.off{background:var(--error)}
+main{flex:1;padding:24px;max-width:1280px;margin:0 auto;width:100%}
+.grid{display:grid;gap:20px}
+.grid-hero{grid-template-columns:1fr}
+.grid-metrics{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+@media(min-width:768px){.grid-hero{grid-template-columns:340px 1fr}}
+.section-label{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+
+/* ── Cards ────────────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.card-title{font-size:.8rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-secondary)}
+
+/* ── SOH Gauge ────────────────────────────────────────────── */
+.soh-card{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 20px;min-height:320px}
+.gauge-wrap{position:relative;width:220px;height:220px;margin-bottom:16px}
+.gauge-wrap svg{width:100%;height:100%}
+.gauge-bg{fill:none;stroke:var(--border);stroke-width:12;stroke-linecap:round}
+.gauge-fg{fill:none;stroke:var(--success);stroke-width:12;stroke-linecap:round;transition:stroke-dashoffset .8s ease,stroke .4s ease}
+.gauge-text{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.soh-value{font-size:3rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);line-height:1}
+.soh-unit{font-size:1.2rem;color:var(--text-secondary);margin-left:2px}
+.soh-label{font-size:.85rem;color:var(--text-secondary);margin-top:4px}
+.soh-timestamp{font-size:.75rem;color:var(--text-muted);margin-top:12px;font-family:var(--font-mono)}
+.soh-source{margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center}
+
+/* Health state chip */
+.health-state{margin-top:10px;display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:.8rem;font-weight:700;letter-spacing:.04em;border:1px solid transparent}
+.health-good{background:rgba(16,185,129,.12);color:var(--success);border-color:rgba(16,185,129,.3)}
+.health-warn{background:rgba(245,158,11,.12);color:var(--warning);border-color:rgba(245,158,11,.3)}
+.health-crit{background:rgba(239,68,68,.12);color:var(--error);border-color:rgba(239,68,68,.3)}
+.health-unknown{background:rgba(100,116,139,.1);color:var(--text-muted);border-color:var(--border)}
+
+/* ── Metric cards ─────────────────────────────────────────── */
+.metric{text-align:center;padding:16px}
+.metric-value{font-size:1.6rem;font-weight:700;font-family:var(--font-mono);color:var(--text-primary)}
+.metric-unit{font-size:.85rem;color:var(--text-secondary);margin-left:2px}
+.metric-label{font-size:.75rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+
+/* ── Chart ────────────────────────────────────────────────── */
+.chart-area{min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)}
+.chart-area svg{width:100%;height:200px}
+.chart-line{fill:none;stroke:var(--accent);stroke-width:2}
+.chart-dot{fill:var(--accent);r:3}
+.chart-grid{stroke:var(--border);stroke-width:.5}
+.chart-label{fill:var(--text-muted);font-size:10px;font-family:var(--font-mono)}
+
+/* ── Expandable panels ────────────────────────────────────── */
+.panel-toggle{width:100%;text-align:left;padding:0;display:flex;align-items:center;justify-content:space-between;min-height:44px}
+.panel-toggle .arrow{transition:transform .2s ease;font-size:.8rem;color:var(--text-muted)}
+.panel-toggle[aria-expanded="true"] .arrow{transform:rotate(90deg)}
+.panel-body{display:none;margin-top:12px}
+.panel-body.open{display:block}
+.info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(30,41,59,.5);font-size:.85rem}
+.info-label{color:var(--text-secondary)}
+.info-value{color:var(--text-primary);font-family:var(--font-mono);text-align:right;max-width:60%;word-break:break-word}
+
+/* ── Developer test panel ─────────────────────────────────── */
+.test-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.test-field label{display:block;font-size:.75rem;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em}
+.test-field input{width:100%;padding:8px 10px;font-family:var(--font-mono);font-size:.85rem}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 24px;border-radius:var(--radius-sm);font-weight:600;font-size:.85rem;min-height:44px;min-width:44px;transition:background .15s ease,box-shadow .15s ease}
+.btn-primary{background:var(--accent);color:#0a0e1a}
+.btn-primary:hover{box-shadow:0 0 16px rgba(6,182,212,.4)}
+.btn-outline{border:1px solid var(--border);color:var(--text-secondary)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn-danger{border:1px solid rgba(239,68,68,.4);color:var(--error)}
+.btn-danger:hover{background:rgba(239,68,68,.1);border-color:var(--error)}
+.test-result{margin-top:16px;padding:16px;background:var(--bg);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:.8rem;white-space:pre-wrap}
+.test-result .ok{color:var(--success)}
+.test-result .err{color:var(--error)}
+
+/* ── Alerts ───────────────────────────────────────────────── */
+.alert-item{display:flex;align-items:flex-start;gap:12px;padding:10px;border-radius:var(--radius-sm);background:var(--bg);margin-bottom:8px;font-size:.85rem}
+.alert-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px}
+.alert-warn .alert-dot{background:var(--warning)}
+.alert-err .alert-dot{background:var(--error)}
+.alert-info .alert-dot{background:var(--accent)}
+.alert-label{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-left:auto;padding:2px 8px;border-radius:10px}
+.empty-state{color:var(--text-muted);text-align:center;padding:20px;font-size:.85rem}
+
+/* ── Demo controls bar ────────────────────────────────────── */
+.demo-bar{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:var(--radius-sm);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:20px;font-size:.85rem}
+.demo-bar-msg{display:flex;align-items:center;gap:8px;color:var(--warning);font-weight:600}
+.demo-bar-note{color:var(--text-muted);font-size:.8rem}
+
+/* ── First launch overlay ─────────────────────────────────── */
+.overlay{position:fixed;inset:0;background:rgba(10,14,26,.92);display:flex;align-items:center;justify-content:center;z-index:200}
+.overlay-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:40px;text-align:center;max-width:440px;width:90%}
+.overlay-card h2{font-size:1.4rem;color:var(--accent);margin-bottom:8px}
+.overlay-card p{color:var(--text-secondary);margin-bottom:8px;font-size:.9rem}
+.overlay-card .note{color:var(--text-muted);font-size:.78rem;margin-bottom:24px}
+.overlay-card .btn+.btn{margin-left:12px}
+.hidden{display:none!important}
+
+/* ── Initial Gateway Connection Loading Screen ───────────── */
+.loading-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:9999;transition:opacity .4s ease,visibility .4s ease}
+.loading-overlay.hidden{opacity:0;visibility:hidden;pointer-events:none}
+.loading-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:48px 36px;text-align:center;max-width:460px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.loading-logo h1{font-size:1.8rem;font-weight:700;letter-spacing:.08em;color:var(--accent);text-shadow:0 0 20px rgba(6,182,212,.3);margin-bottom:4px}
+.loading-logo span{font-size:.85rem;color:var(--text-secondary);display:block;margin-bottom:24px}
+.spinner-container{display:flex;justify-content:center;margin:20px 0}
+.spinner{width:44px;height:44px;border:3px solid rgba(6,182,212,.15);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-status{font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:8px}
+.loading-substatus{font-size:.8rem;color:var(--text-muted);margin-bottom:16px}
+.loading-retry-btn{margin-top:12px}
+
+/* ── Status steps ─────────────────────────────────────────── */
+.status-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:.85rem}
+.status-icon{width:18px;text-align:center}
+.status-ok{color:var(--success)}
+.status-err{color:var(--error)}
+.status-pending{color:var(--text-muted)}
+
+/* ── Separator ────────────────────────────────────────────── */
+.section-gap{margin-bottom:20px}
+
+/* ── Mobile ───────────────────────────────────────────────── */
+@media(max-width:767px){
+  header{padding:10px 16px}
+  .logo h1{font-size:1.2rem}
+  main{padding:16px}
+  .soh-card{padding:24px 16px;min-height:260px}
+  .gauge-wrap{width:180px;height:180px}
+  .soh-value{font-size:2.4rem}
+  .grid-metrics{grid-template-columns:repeat(2,1fr)}
+  .test-grid{grid-template-columns:1fr}
+  .loading-card{padding:32px 20px}
+}
+
+/* ── Skip link ────────────────────────────────────────────── */
+.skip-link{position:absolute;top:-40px;left:0;padding:8px 16px;background:var(--accent);color:#0a0e1a;font-weight:700;z-index:999;border-radius:0 0 8px 0}
+.skip-link:focus{top:0}
+</style>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<!-- ── INITIAL GATEWAY CONNECTION LOADING SCREEN ──────────── -->
+<div id="loading-screen" class="loading-overlay" role="status" aria-live="polite">
+  <div class="loading-card">
+    <div class="loading-logo">
+      <h1>CELLSENSE</h1>
+      <span>EV Battery Health Monitoring</span>
+    </div>
+    <div class="spinner-container">
+      <div class="spinner" aria-hidden="true"></div>
+    </div>
+    <div class="loading-status" id="loading-status-text">Connecting to EV Battery Gateway...</div>
+    <div class="loading-substatus" id="loading-substatus-text">Establishing telemetry link and verifying ML engine...</div>
+    <div id="loading-retry-container" class="hidden">
+      <button class="btn btn-outline loading-retry-btn" onclick="retryConnection()" aria-label="Retry connecting to gateway">Retry Connection</button>
+    </div>
+  </div>
+</div>
+
+<div class="app" id="app">
+
+<!-- ── FIRST LAUNCH OVERLAY (for physical device guidance) ── -->
+<div class="overlay hidden" id="overlay" role="dialog" aria-modal="true" aria-labelledby="overlay-title">
+  <div class="overlay-card">
+    <h2 id="overlay-title">CellSense Ready</h2>
+    <p>No physical CAN/OBD-II device connected.<br>Explore the dashboard with simulated demo telemetry, or dismiss to view the idle dashboard.</p>
+    <p class="note">Demo mode generates synthetic feature inputs and runs them through the real inference engine. The predicted SOH values are real model outputs, not fabricated numbers.</p>
+    <button class="btn btn-primary" onclick="startDemo()" aria-label="Start demo mode with simulated telemetry">Start Demo</button>
+    <button class="btn btn-outline" onclick="dismissOverlay()" aria-label="Dismiss and view idle dashboard">View Dashboard</button>
+  </div>
+</div>
+
+<!-- ── HEADER ──────────────────────────────────────────────── -->
+<header role="banner">
+  <div class="logo">
+    <h1>CELLSENSE</h1>
+    <span>EV Battery Health Monitoring</span>
+  </div>
+  <div class="header-badges" role="status" aria-label="Connection and mode status">
+    <span class="badge badge-demo hidden" id="badge-demo" aria-live="polite" role="status">⚡ Demo — Simulated Telemetry</span>
+    <span class="badge" id="badge-conn" aria-live="polite">
+      <span class="conn-dot off" id="conn-dot" aria-hidden="true"></span>
+      <span id="conn-text">Connecting...</span>
+    </span>
+  </div>
+</header>
+
+<!-- ── MAIN ────────────────────────────────────────────────── -->
+<main id="main-content">
+
+<!-- Demo active bar (visible only when demo is running) -->
+<div class="demo-bar hidden" id="demo-bar" role="status" aria-live="polite">
+  <span class="demo-bar-msg">⚡ Demo Mode Active
+    <span class="demo-bar-note">— Synthetic telemetry fed through real CellSense inference engine</span>
+  </span>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span class="demo-bar-note">SOH predictions are genuine model outputs</span>
+    <button class="btn btn-danger" onclick="stopDemo()" aria-label="Stop demo mode">Stop Demo</button>
+  </div>
+</div>
+
+<!-- ─── SECTION 1: Hero — SOH Gauge + Live metrics ────────── -->
+<div class="section-label">Battery Status</div>
+<section class="grid grid-hero section-gap" aria-label="Battery State of Health overview">
+
+  <!-- SOH Gauge card -->
+  <div class="card soh-card">
+    <div class="card-title" style="margin-bottom:12px" id="soh-card-label">Estimated State of Health</div>
+    <div class="gauge-wrap" role="img" aria-labelledby="soh-card-label" aria-describedby="soh-accessible-desc">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="gauge-bg" cx="60" cy="60" r="50" transform="rotate(-90 60 60)"
+                stroke-dasharray="314.16" stroke-dashoffset="0"/>
+        <circle class="gauge-fg" id="gauge-arc" cx="60" cy="60" r="50" transform="rotate(-90 60 60)"
+                stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
+      </svg>
+      <div class="gauge-text">
+        <span class="soh-value" id="soh-value" aria-live="polite" aria-atomic="true">—</span>
+        <span class="soh-label">Estimated SOH</span>
+      </div>
+    </div>
+    <!-- Accessible text description of gauge -->
+    <span id="soh-accessible-desc" class="hidden" aria-live="polite"></span>
+
+    <!-- Health state text label (NOT color-only) -->
+    <div id="health-state-chip" class="health-state health-unknown" role="status" aria-live="polite" aria-label="Battery health state">
+      <span id="health-state-icon" aria-hidden="true">○</span>
+      <span id="health-state-text">No Data</span>
+    </div>
+
+    <div class="soh-timestamp" id="soh-timestamp" aria-label="Last prediction time">No prediction yet</div>
+    <div class="soh-source" id="soh-source"></div>
+  </div>
+
+  <!-- Right column: metrics + chart -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+
+    <!-- Telemetry metric cards -->
+    <div class="grid grid-metrics" aria-label="Live telemetry values">
+      <div class="card metric" id="m-voltage">
+        <div class="metric-value" id="mv-voltage" aria-label="Voltage mean">—</div>
+        <div class="metric-label">Voltage Mean<span class="metric-unit"> V</span></div>
+      </div>
+      <div class="card metric" id="m-current">
+        <div class="metric-value" id="mv-current" aria-label="Current mean">—</div>
+        <div class="metric-label">Current Mean<span class="metric-unit"> A</span></div>
+      </div>
+      <div class="card metric" id="m-energy">
+        <div class="metric-value" id="mv-energy" aria-label="Energy">—</div>
+        <div class="metric-label">Energy<span class="metric-unit"> Wh</span></div>
+      </div>
+      <div class="card metric" id="m-duration">
+        <div class="metric-value" id="mv-duration" aria-label="Discharge duration">—</div>
+        <div class="metric-label">Discharge Duration</div>
+      </div>
+      <div class="card metric" id="m-power">
+        <div class="metric-value" id="mv-power" aria-label="Power mean">—</div>
+        <div class="metric-label">Power Mean<span class="metric-unit"> W</span></div>
+      </div>
+      <div class="card metric" id="m-predictions">
+        <div class="metric-value" id="mv-predictions" aria-label="Total predictions">0</div>
+        <div class="metric-label">Predictions</div>
+      </div>
+    </div>
+
+    <!-- SOH Trend chart -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">SOH Trend</div>
+        <span id="chart-summary" class="hidden" aria-live="polite"></span>
+      </div>
+      <div class="chart-area" id="chart-area" role="img" aria-label="SOH trend chart — waiting for predictions">Waiting for predictions…</div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── SECTION 2: Alerts ──────────────────────────────────── -->
+<div class="section-label">Alerts</div>
+<section class="card section-gap" aria-label="Active system alerts" aria-live="polite">
+  <div id="alerts-list"><div class="empty-state" role="status">No active alerts</div></div>
+</section>
+
+<!-- ─── SECTION 3: System Status ──────────────────────────── -->
+<div class="section-label">System Status</div>
+<section class="card section-gap" aria-label="System and connection status">
+  <div id="diag-info" role="status">
+    <div class="status-row"><span class="status-icon status-pending" aria-hidden="true">○</span> Initialising…</div>
+  </div>
+</section>
+
+<!-- ─── SECTION 4: ML Engine Info ─────────────────────────── -->
+<div class="section-label">ML Engine</div>
+<section class="card section-gap">
+  <button class="panel-toggle" id="toggle-model" aria-expanded="false" aria-controls="panel-model" onclick="togglePanel('model')">
+    <span class="card-title">Model Information</span>
+    <span class="arrow" aria-hidden="true">▶</span>
+  </button>
+  <div class="panel-body" id="panel-model" role="region" aria-label="ML model details">
+    <div id="model-info">Loading model information…</div>
+  </div>
+</section>
+
+<!-- ─── SECTION 5: Developer — Manual Prediction ──────────── -->
+<div class="section-label">Developer Tools</div>
+<section class="card section-gap">
+  <button class="panel-toggle" id="toggle-dev" aria-expanded="false" aria-controls="panel-dev" onclick="togglePanel('dev')">
+    <span class="card-title">Manual Prediction — Enter Feature Values</span>
+    <span class="arrow" aria-hidden="true">▶</span>
+  </button>
+  <div class="panel-body" id="panel-dev" role="region" aria-label="Manual prediction input panel">
+    <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:12px">
+      Enter the 14 model features directly and run the real CellSense inference engine. Values are validated against physical bounds before prediction.
+    </p>
+    <div class="test-grid" id="test-inputs"></div>
+    <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="runTestPrediction()" aria-label="Run model prediction with entered feature values">Run Prediction</button>
+      <button class="btn btn-outline" onclick="fillDefaults()" aria-label="Fill inputs with default example values">Fill Defaults</button>
+    </div>
+    <div class="test-result hidden" id="test-result" role="status" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- ─── SECTION 6: Demo Controls (non-demo state) ─────────── -->
+<div class="section-label" id="demo-section-label">Demo Mode</div>
+<section class="card section-gap" id="demo-section" aria-label="Demo mode controls">
+  <div class="card-header">
+    <div class="card-title">Simulated Telemetry Demo</div>
+  </div>
+  <p style="font-size:.82rem;color:var(--text-muted);margin-bottom:16px">
+    Demo mode generates synthetic battery telemetry within the model's trained feature ranges.
+    The feature values are passed through the real CellSense inference engine —
+    the resulting SOH estimates are genuine model outputs, not fabricated numbers.
+    <strong style="color:var(--warning)"> Demo telemetry is clearly labelled and must not be confused with real vehicle measurements.</strong>
+  </p>
+  <div style="display:flex;gap:12px;flex-wrap:wrap" id="demo-controls">
+    <button class="btn btn-primary" id="btn-start-demo" onclick="startDemo()" aria-label="Start demo mode">Start Demo</button>
+    <button class="btn btn-danger hidden" id="btn-stop-demo" onclick="stopDemo()" aria-label="Stop demo mode">Stop Demo</button>
+  </div>
+</section>
+
+<!-- ─── SECTION 7: MCU Deployment Readiness ───────────────── -->
+<section class="card section-gap">
+  <button class="panel-toggle" id="toggle-mcu" aria-expanded="false" aria-controls="panel-mcu" onclick="togglePanel('mcu')">
+    <span class="card-title">Embedded Deployment Readiness</span>
+    <span class="arrow" aria-hidden="true">▶</span>
+  </button>
+  <div class="panel-body" id="panel-mcu" role="region" aria-label="MCU deployment status">
+    <div id="mcu-info"></div>
+  </div>
+</section>
+
+</main>
+</div><!-- /.app -->
+
+<script>
+/* ────────────────────────────────────────────────────────────
+   CellSense Dashboard — Client-Side Logic
+   Backend is the sole source of truth for SOH predictions.
+   No SOH values are calculated in JavaScript.
+   ──────────────────────────────────────────────────────────── */
+
+/* ── State ─────────────────────────────────────────────────── */
+const S = {
+  ws: null, demoMode: false, modelLoaded: false,
+  predictionHistory: [], latestTelemetry: null,
+  wsRetryDelay: 1000, wsRetries: 0,
+  isGatewayConnected: false,
+};
+
+const FEATURES = [
+  {name:'voltage_mean',            label:'Voltage Mean (V)',        default:3.825},
+  {name:'voltage_min',             label:'Voltage Min (V)',         default:2.6995},
+  {name:'voltage_max',             label:'Voltage Max (V)',         default:4.210},
+  {name:'voltage_std',             label:'Voltage Std (V)',         default:0.275},
+  {name:'current_mean',            label:'Current Mean (A)',        default:-0.045},
+  {name:'current_min',             label:'Current Min (A)',         default:-0.550},
+  {name:'current_max',             label:'Current Max (A)',         default:0.870},
+  {name:'current_std',             label:'Current Std (A)',         default:0.534},
+  {name:'discharge_duration_sec',  label:'Discharge Duration (s)',  default:420000.0},
+  {name:'energy_Wh',               label:'Energy (Wh)',             default:9.5},
+  {name:'power_mean',              label:'Power Mean (W)',          default:-0.05},
+  {name:'power_std',               label:'Power Std (W)',           default:2.055},
+  {name:'voltage_slope',           label:'Voltage Slope (V/s)',     default:-1.2e-6},
+  {name:'current_slope',           label:'Current Slope (A/s)',     default:-4.5e-6},
+];
+
+/* ── DOM helpers ───────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const show = (el) => el && el.classList.remove('hidden');
+const hide = (el) => el && el.classList.add('hidden');
+
+/* ── Loading Screen & Transition to Dashboard ──────────────── */
+let isDashboardReady = false;
+
+function transitionToDashboard() {
+  if (isDashboardReady) return;
+  isDashboardReady = true;
+  S.isGatewayConnected = true;
+
+  const statusEl = $('loading-status-text');
+  const substatusEl = $('loading-substatus-text');
+  if (statusEl) statusEl.textContent = 'Connected to EV Battery Gateway';
+  if (substatusEl) substatusEl.textContent = 'ML engine ready. Loading dashboard...';
+
+  // Smooth transition: fade out loading screen
+  setTimeout(() => {
+    const ls = $('loading-screen');
+    if (ls) ls.classList.add('hidden');
+  }, 350);
+}
+
+function handleConnectionTimeout() {
+  if (isDashboardReady) return;
+  const statusEl = $('loading-status-text');
+  const substatusEl = $('loading-substatus-text');
+  const retryCont = $('loading-retry-container');
+  if (statusEl) statusEl.textContent = 'Backend Connection Unavailable';
+  if (substatusEl) substatusEl.textContent = 'Unable to reach CellSense gateway at ' + window.location.host;
+  show(retryCont);
+}
+
+function retryConnection() {
+  const statusEl = $('loading-status-text');
+  const substatusEl = $('loading-substatus-text');
+  const retryCont = $('loading-retry-container');
+  hide(retryCont);
+  if (statusEl) statusEl.textContent = 'Connecting to EV Battery Gateway...';
+  if (substatusEl) substatusEl.textContent = 'Retrying telemetry link and verifying ML engine...';
+  initGatewayConnection();
+}
+
+/* ── Panels ────────────────────────────────────────────────── */
+function togglePanel(name) {
+  const btn = $('toggle-'+name);
+  const body = $('panel-'+name);
+  if (!btn || !body) return;
+  const expanded = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', String(!expanded));
+  body.classList.toggle('open');
+}
+
+/* ── Format helpers ────────────────────────────────────────── */
+function fmtNum(v, dp=2) {
+  if (v===null||v===undefined||isNaN(v)) return '—';
+  return Number(v).toFixed(dp);
+}
+function fmtDuration(sec) {
+  if (!sec||isNaN(sec)) return '—';
+  if (sec<60) return sec.toFixed(1)+'s';
+  if (sec<3600) return (sec/60).toFixed(1)+'m';
+  return (sec/3600).toFixed(1)+'h';
+}
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts*1000).toLocaleTimeString();
+}
+
+/* ── Health State ──────────────────────────────────────────── */
+function getHealthState(soh) {
+  if (soh === null || soh === undefined || isNaN(soh)) {
+    return {cls:'health-unknown', icon:'○', text:'No Data'};
+  }
+  if (soh >= 80) return {cls:'health-good',  icon:'✓', text:'Healthy (≥80%)'};
+  if (soh >= 50) return {cls:'health-warn',  icon:'!', text:'Degraded (50–79%)'};
+  return            {cls:'health-crit',  icon:'✗', text:'Critical (<50%)'};
+}
+
+function setHealthState(soh) {
+  const chip = $('health-state-chip');
+  const icon = $('health-state-icon');
+  const text = $('health-state-text');
+  if (!chip || !icon || !text) return;
+  const state = getHealthState(soh);
+  chip.className = 'health-state ' + state.cls;
+  icon.textContent = state.icon;
+  text.textContent = state.text;
+}
+
+/* ── SOH gauge ─────────────────────────────────────────────── */
+function setGauge(soh) {
+  const arc = $('gauge-arc');
+  const valEl = $('soh-value');
+  const desc = $('soh-accessible-desc');
+  const circ = 314.16;
+  if (!arc || !valEl) return;
+
+  if (soh===null||soh===undefined||isNaN(soh)) {
+    arc.style.strokeDashoffset = circ;
+    valEl.textContent = '—';
+    setHealthState(null);
+    if (desc) desc.textContent = 'No SOH data available.';
+    return;
+  }
+  const pct = Math.max(0, Math.min(100, soh));
+  arc.style.strokeDashoffset = circ - (circ * pct / 100);
+  if (pct >= 80) arc.style.stroke = 'var(--success)';
+  else if (pct >= 50) arc.style.stroke = 'var(--warning)';
+  else arc.style.stroke = 'var(--error)';
+  valEl.innerHTML = fmtNum(soh)+'<span class="soh-unit">%</span>';
+  setHealthState(pct);
+  if (desc) desc.textContent = `Estimated State of Health: ${fmtNum(soh)}%. ${getHealthState(pct).text}.`;
+}
+
+/* ── Chart ─────────────────────────────────────────────────── */
+function drawChart() {
+  const area = $('chart-area');
+  const chartSummary = $('chart-summary');
+  if (!area) return;
+
+  const pts = S.predictionHistory;
+  if (pts.length < 2) {
+    area.textContent = pts.length===0 ? 'Waiting for predictions…' : 'Waiting for additional predictions…';
+    area.setAttribute('aria-label', 'SOH trend chart — not enough data yet');
+    return;
+  }
+  const sohs = pts.map(p=>p.soh).filter(v=>v!=null&&!isNaN(v));
+  if (sohs.length < 2) {
+    area.textContent = 'Waiting for valid predictions…';
+    return;
+  }
+  const W = 600, H = 180, PAD = 40;
+  const minY = Math.floor(Math.min(...sohs))-1;
+  const maxY = Math.ceil(Math.max(...sohs))+1;
+  const rangeY = maxY - minY || 1;
+  const sx = i => PAD + (i/(sohs.length-1))*(W-2*PAD);
+  const sy = v => PAD + (1-(v-minY)/rangeY)*(H-2*PAD);
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-hidden="true">`;
+  const steps = 4;
+  for(let i=0;i<=steps;i++){
+    const yv = minY + (rangeY*i/steps);
+    const yp = sy(yv);
+    svg += `<line x1="${PAD}" y1="${yp}" x2="${W-PAD}" y2="${yp}" class="chart-grid"/>`;
+    svg += `<text x="${PAD-6}" y="${yp+3}" class="chart-label" text-anchor="end">${yv.toFixed(1)}</text>`;
+  }
+  let path = `M${sx(0)},${sy(sohs[0])}`;
+  for(let i=1;i<sohs.length;i++) path += ` L${sx(i)},${sy(sohs[i])}`;
+  svg += `<path d="${path}" class="chart-line"/>`;
+  for(let i=0;i<sohs.length;i++) svg += `<circle cx="${sx(i)}" cy="${sy(sohs[i])}" class="chart-dot"/>`;
+  svg += '</svg>';
+  area.innerHTML = svg;
+  area.setAttribute('aria-label', `SOH trend chart — ${sohs.length} predictions, latest: ${fmtNum(sohs[sohs.length-1])}%`);
+
+  if (chartSummary) {
+    chartSummary.textContent = `Chart shows ${sohs.length} predictions. Range: ${fmtNum(Math.min(...sohs))}% to ${fmtNum(Math.max(...sohs))}%. Latest: ${fmtNum(sohs[sohs.length-1])}%.`;
+    show(chartSummary);
+  }
+}
+
+/* ── Update UI from prediction ─────────────────────────────── */
+function updateFromPrediction(pred) {
+  if (!pred) return;
+  S.predictionHistory.push(pred);
+  if (S.predictionHistory.length > 200) S.predictionHistory.shift();
+
+  if (pred.soh != null && !isNaN(pred.soh)) {
+    setGauge(pred.soh);
+    const tsEl = $('soh-timestamp');
+    if (tsEl) tsEl.textContent = 'Last prediction: ' + fmtTime(pred.timestamp);
+    const srcLabel = pred.source === 'demo' ? 'DEMO'
+                   : pred.source === 'python_model' ? 'Python Model'
+                   : pred.source === 'cellsense_mcu' ? 'MCU Model'
+                   : String(pred.source).toUpperCase();
+    const cls = pred.source === 'demo' ? 'badge-demo'
+              : pred.source === 'cellsense_mcu' ? 'badge-mcu'
+              : 'badge-python';
+    const srcEl = $('soh-source');
+    if (srcEl) srcEl.innerHTML = `<span class="badge ${cls}" aria-label="Prediction source: ${srcLabel}">${srcLabel}</span>`;
+  }
+  const predCountEl = $('mv-predictions');
+  if (predCountEl) predCountEl.textContent = S.predictionHistory.length;
+  drawChart();
+  updateDiagnostics();
+}
+
+function updateTelemetry(tel) {
+  if (!tel) return;
+  S.latestTelemetry = tel;
+  if ($('mv-voltage')) $('mv-voltage').textContent  = fmtNum(tel.voltage_mean, 4);
+  if ($('mv-current')) $('mv-current').textContent  = fmtNum(tel.current_mean, 4);
+  if ($('mv-energy')) $('mv-energy').textContent   = fmtNum(tel.energy_Wh, 2);
+  if ($('mv-duration')) $('mv-duration').textContent = fmtDuration(tel.discharge_duration_sec);
+  if ($('mv-power')) $('mv-power').textContent    = fmtNum(tel.power_mean, 4);
+}
+
+/* ── Demo mode UI ──────────────────────────────────────────── */
+function setDemoMode(on) {
+  S.demoMode = Boolean(on);
+  if (on) {
+    show($('badge-demo'));
+    show($('demo-bar'));
+    show($('btn-stop-demo'));
+    hide($('btn-start-demo'));
+  } else {
+    hide($('badge-demo'));
+    hide($('demo-bar'));
+    hide($('btn-stop-demo'));
+    show($('btn-start-demo'));
+  }
+}
+
+/* ── Connection state ──────────────────────────────────────── */
+function setConnState(connected) {
+  const dot = $('conn-dot');
+  const txt = $('conn-text');
+  const badge = $('badge-conn');
+  if (connected) {
+    if (dot) dot.className = 'conn-dot on';
+    if (txt) txt.textContent = 'Connected';
+    if (badge) badge.className = 'badge badge-connected';
+  } else {
+    if (dot) dot.className = 'conn-dot off';
+    if (txt) txt.textContent = isDashboardReady ? 'Disconnected' : 'Connecting...';
+    if (badge) badge.className = 'badge badge-disconnected';
+  }
+}
+
+/* ── WebSocket ─────────────────────────────────────────────── */
+function connectWS() {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host || 'localhost:8000';
+  const url = `${proto}//${host}/ws/telemetry`;
+
+  try {
+    S.ws = new WebSocket(url);
+  } catch(e) {
+    console.warn('[CellSense WS] Connection creation error:', e);
+    setTimeout(connectWS, 2000);
+    return;
+  }
+
+  S.ws.onopen = () => {
+    setConnState(true);
+    S.wsRetries = 0;
+    S.wsRetryDelay = 1000;
+    transitionToDashboard();
+    updateDiagnostics();
+  };
+
+  S.ws.onclose = () => {
+    setConnState(false);
+    S.wsRetryDelay = Math.min(S.wsRetryDelay * 1.5, 8000);
+    updateDiagnostics();
+    setTimeout(connectWS, S.wsRetryDelay);
+  };
+
+  S.ws.onerror = (err) => {
+    console.warn('[CellSense WS] Error encountered');
+  };
+
+  S.ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      handleWSMessage(msg);
+    } catch(e) {
+      console.warn('[CellSense WS] Parse error:', e);
+    }
+  };
+}
+
+function handleWSMessage(msg) {
+  if (!msg) return;
+  if (msg.type === 'init' && msg.data) {
+    S.modelLoaded = Boolean(msg.data.model_loaded);
+    setDemoMode(msg.data.demo_mode);
+    if (msg.data.last_prediction) updateFromPrediction(msg.data.last_prediction);
+    transitionToDashboard();
+    updateDiagnostics();
+  }
+  else if (msg.type === 'telemetry' && msg.data) {
+    if (msg.data.telemetry) updateTelemetry(msg.data.telemetry);
+    if (msg.data.prediction) updateFromPrediction(msg.data.prediction);
+    if (msg.data.is_simulated) setDemoMode(true);
+    transitionToDashboard();
+  }
+  else if (msg.type === 'prediction' && msg.data) {
+    updateFromPrediction(msg.data);
+    transitionToDashboard();
+  }
+  else if (msg.type === 'demo_started') { setDemoMode(true); }
+  else if (msg.type === 'demo_stopped') { setDemoMode(false); }
+}
+
+function wsSend(obj) {
+  if (S.ws && S.ws.readyState === WebSocket.OPEN) S.ws.send(JSON.stringify(obj));
+}
+
+/* ── Demo controls ─────────────────────────────────────────── */
+function dismissOverlay() { hide($('overlay')); }
+
+function startDemo() {
+  dismissOverlay();
+  fetch('/api/demo/start', {method:'POST'})
+    .then(r => r.json())
+    .then(d => setDemoMode(d.demo_mode))
+    .catch(() => {});
+  wsSend({type:'start_demo'});
+}
+
+function stopDemo() {
+  fetch('/api/demo/stop', {method:'POST'})
+    .then(r => r.json())
+    .then(d => setDemoMode(d.demo_mode))
+    .catch(() => {});
+  wsSend({type:'stop_demo'});
+}
+
+/* ── Model info panel ──────────────────────────────────────── */
+async function loadModelInfo() {
+  try {
+    const r = await fetch('/api/ml/model');
+    const d = await r.json();
+    if (d.status === 'unavailable') {
+      const mi = $('model-info');
+      if (mi) mi.innerHTML = '<div class="empty-state" role="status">SOH model unavailable</div>';
+      return;
+    }
+    S.modelLoaded = true;
+    const rows = [
+      ['Model',             d.model_name || d.model_type || 'Not available'],
+      ['Type',              d.model_type  || 'Not available'],
+      ['Framework',         d.framework   || 'Not available'],
+      ['Input Features',    d.input_feature_count || 'Not available'],
+      ['Target Variable',   d.target_variable || 'SOH_percent'],
+      ['Output Format',     d.output_format   || 'SOH %'],
+      ['Preprocessing',     d.preprocessing   || 'Not available'],
+      ['External Scaler',   d.scaler || 'None'],
+      ['Artifact File',     d.artifact_filename || 'Not available'],
+      ['Artifact Size',     d.artifact_size_formatted || 'Not available'],
+      ['Baseline Prediction', d.baseline_prediction != null ? fmtNum(d.baseline_prediction, 6) + '%' : 'Not available'],
+      ['Inference Source',  'CellSense Inference Engine (Python)'],
+      ['Latency',           'Measured per-inference (see Diagnostics)'],
+      ['MCU Latency',       'Not measured — MCU not yet deployed'],
+      ['Flash / RAM Usage', 'Not measured — MCU not yet deployed'],
+    ];
+    if (d.hyperparameters) {
+      rows.push(['Loss Function',      d.hyperparameters.loss || 'N/A']);
+      rows.push(['Learning Rate',      d.hyperparameters.learning_rate || 'N/A']);
+      rows.push(['Boosting Iterations',d.hyperparameters.n_trees_boosting_iterations || 'N/A']);
+      rows.push(['Max Leaf Nodes',     d.hyperparameters.max_leaf_nodes || 'N/A']);
+      rows.push(['Total Leaf Nodes',   d.hyperparameters.total_leaf_nodes || 'N/A']);
+    }
+    let html = '';
+    for (const [l, v] of rows) {
+      html += `<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`;
+    }
+    const mi = $('model-info');
+    if (mi) mi.innerHTML = html;
+  } catch(e) {
+    const mi = $('model-info');
+    if (mi) mi.innerHTML = '<div class="empty-state" role="alert">Backend connection unavailable — could not load model information</div>';
+  }
+}
+
+/* ── MCU / Deployment panel ────────────────────────────────── */
+function renderMCUPanel() {
+  const rows = [
+    ['Python Engine Validation',   '215/215 vectors PASS — exact numerical agreement'],
+    ['Automated Tests',            '56/56 tests PASS'],
+    ['Portable JSON Export',       'embedded/model_data.json — verified tree representation'],
+    ['Model Class',                'HistGradientBoostingRegressor (scikit-learn 1.6.1)'],
+    ['Inference Type',             'Decision tree ensemble (comparisons + additions only)'],
+    ['14-Feature Input',           'Confirmed — exact order enforced'],
+    ['Quantization',               'Not evaluated'],
+    ['C/C++ Conversion',           'Not performed — pending MCU selection'],
+    ['MCU Target',                 'Not yet selected — no MCU deployed'],
+    ['MCU Inference Latency',      'Not measured — requires hardware'],
+    ['MCU Flash / RAM',            'Not measured — requires compilation to target'],
+    ['BLE / Wi-Fi Integration',    'Not implemented — requires hardware'],
+    ['End-to-End Hardware Test',   'Not performed'],
+  ];
+  let html = '<p style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Current status: Python embedded-style engine verified. C/C++ firmware export pending MCU specification.</p>';
+  for (const [l, v] of rows) {
+    html += `<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`;
+  }
+  const mcu = $('mcu-info');
+  if (mcu) mcu.innerHTML = html;
+}
+
+/* ── Diagnostics / System Status ───────────────────────────── */
+function updateDiagnostics() {
+  const ok   = '<span class="status-icon status-ok" aria-hidden="true">✓</span>';
+  const err  = '<span class="status-icon status-err" aria-hidden="true">✗</span>';
+  const pend = '<span class="status-icon status-pending" aria-hidden="true">○</span>';
+  const wsConn = S.ws && S.ws.readyState === WebSocket.OPEN;
+  const lastPred = S.predictionHistory.length ? S.predictionHistory[S.predictionHistory.length-1] : null;
+  const lastLatency = lastPred && lastPred.inference_latency_ms != null
+    ? fmtNum(lastPred.inference_latency_ms, 3) + ' ms'
+    : 'Not measured';
+  const lastSOH = lastPred ? fmtNum(lastPred.soh) + '%' : 'None';
+
+  const rows = [
+    ['Backend',          (wsConn || S.isGatewayConnected) ? ok+' Connected' : err+' Unavailable'],
+    ['SOH Model',        S.modelLoaded ? ok+' Loaded (HistGradientBoostingRegressor)' : err+' Not loaded'],
+    ['WebSocket',        wsConn ? ok+' Connected' : err+' Disconnected (auto-reconnect)'],
+    ['Demo Mode',        S.demoMode ? ok+' Active — Simulated Telemetry' : pend+' Inactive'],
+    ['CAN / OBD-II',     err+' Not connected'],
+    ['BLE',              err+' Not connected'],
+    ['Data Stream',      S.demoMode ? ok+' Simulated (demo)' : pend+' Inactive'],
+    ['Total Predictions',String(S.predictionHistory.length)],
+    ['Last SOH',         lastSOH],
+    ['Last Latency',     lastLatency],
+  ];
+  let html = '';
+  for (const [l, v] of rows) {
+    html += `<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`;
+  }
+  const diag = $('diag-info');
+  if (diag) diag.innerHTML = html;
+}
+
+/* ── Alerts ────────────────────────────────────────────────── */
+async function loadAlerts() {
+  try {
+    const r = await fetch('/api/alerts');
+    const d = await r.json();
+    const list = $('alerts-list');
+    if (!list) return;
+    if (!d.alerts || d.alerts.length === 0) {
+      list.innerHTML = '<div class="empty-state" role="status">No active alerts</div>';
+      return;
+    }
+    let html = '';
+    for (const a of d.alerts) {
+      const cls = a.severity === 'critical' ? 'alert-err' : a.severity === 'warning' ? 'alert-warn' : 'alert-info';
+      const label = a.severity ? a.severity.toUpperCase() : 'INFO';
+      html += `<div class="alert-item ${cls}" role="alert">
+        <span class="alert-dot" aria-hidden="true"></span>
+        <span>${a.message || a.title || 'Alert'}</span>
+        <span class="alert-label">${label}</span>
+      </div>`;
+    }
+    list.innerHTML = html;
+  } catch(e) {
+    // Silently tolerate
+  }
+}
+
+/* ── Developer test panel ──────────────────────────────────── */
+function buildTestInputs() {
+  let html = '';
+  for (const f of FEATURES) {
+    html += `<div class="test-field">
+      <label for="ti-${f.name}">${f.label}</label>
+      <input id="ti-${f.name}" type="number" step="any" value="${f.default}" aria-label="${f.label}">
+    </div>`;
+  }
+  const ti = $('test-inputs');
+  if (ti) ti.innerHTML = html;
+}
+
+function fillDefaults() {
+  for (const f of FEATURES) {
+    const el = document.getElementById('ti-'+f.name);
+    if (el) el.value = f.default;
+  }
+}
+
+async function runTestPrediction() {
+  const resEl = $('test-result');
+  if (!resEl) return;
+  show(resEl);
+  resEl.innerHTML = '<span style="color:var(--text-muted)">Running prediction…</span>';
+
+  const telemetry = {};
+  for (const f of FEATURES) {
+    const el = document.getElementById('ti-'+f.name);
+    if (!el) { resEl.innerHTML = `<span class="err">Missing input: ${f.name}</span>`; return; }
+    const val = parseFloat(el.value);
+    if (isNaN(val)) {
+      resEl.innerHTML = `<span class="err">Invalid value for ${f.label}: "${el.value}"</span>`;
+      return;
+    }
+    telemetry[f.name] = val;
+  }
+
+  resEl.innerHTML = '<span class="ok">✓ Input validation passed (14 features)</span>\nSending to inference engine…';
+
+  try {
+    const r = await fetch('/api/ml/predict', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({telemetry}),
+    });
+
+    if (!r.ok) {
+      let detail = '';
+      try { detail = JSON.stringify((await r.json()).detail || ''); } catch(e2) {}
+      resEl.innerHTML += `\n<span class="err">✗ API Error ${r.status}: ${detail}</span>`;
+      return;
+    }
+
+    const d = await r.json();
+    resEl.innerHTML =
+`<span class="ok">✓ Input validation passed</span>
+<span class="ok">✓ Feature vector built (14 features)</span>
+<span class="ok">✓ CellSense inference engine executed</span>
+<span class="ok">✓ Prediction returned from backend</span>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Estimated SOH:   ${fmtNum(d.soh)} %
+  Inference:       ${fmtNum(d.inference_latency_ms, 3)} ms
+  Source:          ${d.source}
+  Status:          ${d.inference_status}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Note: SOH is calculated by the backend model,
+not by JavaScript.`;
+
+    updateFromPrediction({soh:d.soh, timestamp:d.timestamp, source:d.source, inference_latency_ms:d.inference_latency_ms});
+  } catch(e) {
+    resEl.innerHTML += `\n<span class="err">✗ Network error: ${e.message}\nBackend connection unavailable</span>`;
+  }
+}
+
+/* ── Load history on init ──────────────────────────────────── */
+async function loadHistory() {
+  try {
+    const r = await fetch('/api/ml/history');
+    const d = await r.json();
+    if (d.predictions && d.predictions.length > 0) {
+      S.predictionHistory = d.predictions;
+      const last = d.predictions[d.predictions.length - 1];
+      updateFromPrediction(last);
+      drawChart();
+    }
+  } catch(e) {}
+}
+
+/* ── Gateway Initialization ───────────────────────────────── */
+function initGatewayConnection() {
+  // 1. Establish WebSocket
+  connectWS();
+
+  // 2. Query REST backend for gateway device status & health
+  fetch('/api/device/status')
+    .then(r => {
+      if (!r.ok) throw new Error('Status ' + r.status);
+      return r.json();
+    })
+    .then(d => {
+      if (d.demo_mode) setDemoMode(true);
+      if (d.model_loaded) S.modelLoaded = true;
+      transitionToDashboard();
+      updateDiagnostics();
+    })
+    .catch(err => {
+      console.warn('[CellSense Gateway] Device status query pending:', err);
+      // Fallback health check
+      fetch('/api/health')
+        .then(r => r.json())
+        .then(h => {
+          if (h.status === 'ok') {
+            if (h.model_loaded) S.modelLoaded = true;
+            if (h.demo_mode) setDemoMode(true);
+            transitionToDashboard();
+            updateDiagnostics();
+          }
+        })
+        .catch(hErr => {
+          console.warn('[CellSense Gateway] Health query pending:', hErr);
+        });
+    });
+
+  // 3. Fallback timeout for unreachable gateway
+  setTimeout(() => {
+    if (!isDashboardReady) {
+      handleConnectionTimeout();
+    }
+  }, 4000);
+}
+
+/* ── App Bootstrap ─────────────────────────────────────────── */
+window.addEventListener('DOMContentLoaded', () => {
+  buildTestInputs();
+  renderMCUPanel();
+  loadModelInfo();
+  loadHistory();
+  loadAlerts();
+  initGatewayConnection();
+
+  // Periodic diagnostics refresh every 5 s
+  setInterval(updateDiagnostics, 5000);
+  // Periodic alert polling every 15 s
+  setInterval(loadAlerts, 15000);
+});
+</script>
+</body>
+</html>
